@@ -1,0 +1,39 @@
+.afd-folder-tile {
+  background-color: rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+}
+
+.afd-popup .afd-entry {
+  min-width: 14em;
+  text-align: center;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.afd-app {
+  padding: 8px;
+  border-radius: 12px;
+  spacing: 4px;
+  min-width: 84px;
+}
+
+.afd-app:hover,
+.afd-app:focus {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+.afd-app-label {
+  text-align: center;
+  font-size: 0.9em;
+  max-width: 84px;
+}
+
+.afd-merge-target {
+  background-color: rgba(255, 255, 255, 0.28);
+  border-radius: 14px;
+}
+
+.afd-drop-left { box-shadow: -4px 0 0 0 rgba(255, 255, 255, 0.85); }
+.afd-drop-right { box-shadow: 4px 0 0 0 rgba(255, 255, 255, 0.85); }
+.afd-drop-top { box-shadow: 0 -4px 0 0 rgba(255, 255, 255, 0.85); }
+.afd-drop-bottom { box-shadow: 0 4px 0 0 rgba(255, 255, 255, 0.85); }

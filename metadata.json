@@ -1,0 +1,9 @@
+{
+  "uuid": "dock-folders@the-unknown.github.io",
+  "name": "Dock Folders",
+  "description": "Group apps into folders in Dash to Dock, like on Android. Requires Dash to Dock.",
+  "shell-version": ["48"],
+  "settings-schema": "org.gnome.shell.extensions.dock-folders",
+  "url": "https://github.com/the-unknown/dock-folders",
+  "version": 1
+}
