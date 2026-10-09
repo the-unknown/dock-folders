@@ -31,7 +31,7 @@ Log out and back in (Wayland), then:
 gnome-extensions enable dock-folders@the-unknown.github.io
 ```
 
-To build an installable zip: `gnome-extensions pack --force .`
+To build an installable zip: `gnome-extensions pack --force --podir=po .`
 
 ## How it works
 

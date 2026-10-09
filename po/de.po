@@ -1,0 +1,22 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: dock-folders\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Right-click an app to remove it from the folder"
+msgstr "Rechtsklick auf App: aus Ordner entfernen"
+
+msgid "Dissolve folder"
+msgstr "Ordner auflösen"
+
+msgid "Add to folder"
+msgstr "Zu Ordner hinzufügen"
+
+msgid "New folder …"
+msgstr "Neuer Ordner …"
+
+msgid "Folder"
+msgstr "Ordner"

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-// Dock Folders – Ordner für Dash to Dock.
+// Dock Folders – folders for Dash to Dock.
 //
-// Hängt sich per Wrapper um DockDash._redisplay: vor dem Original werden die
-// Ordner-Items aus der Dash-Box genommen (DtD berechnet Positionen anhand der
-// Kinder), danach werden Ordner-Mitglieder ausgeblendet und die Ordner-Items
-// wieder eingefügt. Dash to Dock selbst bleibt unverändert.
+// Wraps DockDash._redisplay: before the original runs, our folder items are
+// taken out of the dash box (Dash to Dock computes positions from the box
+// children); afterwards the apps that live in folders are hidden and the
+// folder items are inserted again. Dash to Dock's own files stay untouched.
 
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
@@ -13,7 +13,7 @@ import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
-import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Dash from 'resource:///org/gnome/shell/ui/dash.js';
 import * as DND from 'resource:///org/gnome/shell/ui/dnd.js';
@@ -23,9 +23,11 @@ const DTD_UUID = 'dash-to-dock@micxgx.gmail.com';
 const GRID_COLUMNS = 3;
 const EXTENSION_ENABLED = 1; // = ExtensionState.ENABLED
 
-// Wird in _activate() aus Dash to Dock übernommen (Label-Positionierung)
+const DEFAULT_POSITION_CLASS = ['top', 'right', 'bottom', 'left'];
+
+// Taken from Dash to Dock in _activate() (label positioning); reset in disable()
 let itemShowLabel = null;
-let positionStyleClass = ['top', 'right', 'bottom', 'left'];
+let positionStyleClass = DEFAULT_POSITION_CLASS;
 
 const FolderContainer = GObject.registerClass(
 class AfdFolderContainer extends Dash.DashItemContainer {
@@ -65,13 +67,13 @@ class FolderItem {
         this._button.set_child(this._tile);
         this.actor.setChild(this._button);
 
-        // Drop-Ziel für Apps, die aus der Dock gezogen werden
+        // Drop target for apps dragged from the dock
         this.actor._delegate = this;
         this._button._delegate = this;
 
         this._button.connect('clicked', () => this._toggleMenu());
 
-        // Ordner lassen sich in der Dock verschieben
+        // Folders can be moved within the dock
         this.isFolder = true;
         this._draggable = DND.makeDraggable(this._button, {timeoutThreshold: 200});
         this._draggable.connect('drag-begin', () => {
@@ -161,7 +163,7 @@ class FolderItem {
         nameItem.add_child(entry);
         this._menu.addMenuItem(nameItem);
 
-        // App-Raster
+        // App grid
         const gridItem = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
         const grid = new St.Widget({
             layout_manager: new Clutter.GridLayout(),
@@ -194,15 +196,15 @@ class FolderItem {
         gridItem.add_child(grid);
         this._menu.addMenuItem(gridItem);
 
-        // Fußzeile
+        // Footer
         this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(
-            'Rechtsklick auf App: aus Ordner entfernen'));
-        const dissolve = new PopupMenu.PopupMenuItem('Ordner auflösen');
+            _('Right-click an app to remove it from the folder')));
+        const dissolve = new PopupMenu.PopupMenuItem(_('Dissolve folder'));
         dissolve.connect('activate', () => this._ext.dissolveFolder(this.id));
         this._menu.addMenuItem(dissolve);
     }
 
-    // Apps im Popup per Drag & Drop umsortieren
+    // Reorder apps inside the popup via drag & drop
     _makeTileSortable(tile, folderId, appId) {
         const ext = this._ext;
         const afterOf = (x, actor) => x > actor.width / 2;
@@ -229,11 +231,8 @@ class FolderItem {
                     source.appId === appId)
                     return false;
                 const after = afterOf(x, tile);
-                // Popup wird durch die Änderung neu aufgebaut – nicht mitten im Drop
-                GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-                    ext.moveInFolder(folderId, source.appId, appId, after);
-                    return GLib.SOURCE_REMOVE;
-                });
+                // The change rebuilds the popup – don't do that in the middle of the drop
+                ext.idleAdd(() => ext.moveInFolder(folderId, source.appId, appId, after));
                 return true;
             },
         };
@@ -246,12 +245,12 @@ class FolderItem {
             try {
                 tile.opacity = 255;
             } catch (e) {
-                // Kachel wurde beim Neuaufbau schon zerstört
+                // Tile was already destroyed by a popup rebuild
             }
         });
     }
 
-    // DND-Quelle
+    // DND source
     getDragActor() {
         return new Clutter.Clone({
             source: this._tile,
@@ -264,7 +263,7 @@ class FolderItem {
         return this._tile;
     }
 
-    // DND-Ziel
+    // DND target
     _dropAfter(x, y) {
         return this._dash._isHorizontal
             ? x > this._button.width / 2
@@ -299,9 +298,10 @@ class FolderItem {
     }
 }
 
-export default class AppFolderDockExtension extends Extension {
+export default class DockFoldersExtension extends Extension {
     enable() {
         this._enabled = true;
+        this._idleIds = new Set();
         this._active = false;
         this._activating = false;
         this._settings = this.getSettings();
@@ -326,10 +326,21 @@ export default class AppFolderDockExtension extends Extension {
         Main.extensionManager.disconnect(this._stateId);
         this._settings.disconnect(this._settingsId);
         this._deactivate();
+        this._idleIds.forEach(id => GLib.source_remove(id));
+        this._idleIds = null;
         this._settings = null;
     }
 
-    // ---- Anbindung an Dash to Dock ------------------------------------
+    idleAdd(callback) {
+        const id = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._idleIds.delete(id);
+            callback();
+            return GLib.SOURCE_REMOVE;
+        });
+        this._idleIds.add(id);
+    }
+
+    // ---- Hooks into Dash to Dock ----------------------------------------
 
     async _activate() {
         if (this._active || this._activating)
@@ -376,7 +387,7 @@ export default class AppFolderDockExtension extends Extension {
             this._resyncAll();
             this._docks().forEach(dock => dock.dash._queueRedisplay());
         } catch (e) {
-            console.error(`[dock-folders] Aktivierung fehlgeschlagen: ${e}\n${e.stack}`);
+            console.error(`[dock-folders] activation failed: ${e}\n${e.stack}`);
         } finally {
             this._activating = false;
         }
@@ -410,9 +421,13 @@ export default class AppFolderDockExtension extends Extension {
         if (this._menuProto)
             this._menuProto._rebuildMenu = this._origRebuildMenu;
         this._dashProto = this._iconProto = this._menuProto = null;
+        this._origRedisplay = this._origPopupMenu = this._origRebuildMenu = null;
+        this._origHandleDragOver = this._origAcceptDrop = null;
 
         this._docks().forEach(dock => this._teardownDash(dock.dash));
         this._dtd = null;
+        itemShowLabel = null;
+        positionStyleClass = DEFAULT_POSITION_CLASS;
     }
 
     _docks() {
@@ -440,8 +455,8 @@ export default class AppFolderDockExtension extends Extension {
         this._origHandleDragOver = Object.getOwnPropertyDescriptor(proto, 'handleDragOver');
         this._origAcceptDrop = Object.getOwnPropertyDescriptor(proto, 'acceptDrop');
 
-        // App auf App ziehen → Ordner. Nur im mittleren Bereich des Icons;
-        // am Rand bleibt es beim normalen Umsortieren (CONTINUE → Dash).
+        // Drag an app onto another app → folder. Only in the centre of the icon;
+        // near the edges the dash keeps handling reordering (CONTINUE).
         proto.handleDragOver = function (source, _actor, x, y) {
             if (source?.isFolder) {
                 const dash = this.get_parent()?.get_parent()?._delegate;
@@ -457,7 +472,7 @@ export default class AppFolderDockExtension extends Extension {
                 ext._setMergeTarget(null);
                 return DND.DragMotionResult.CONTINUE;
             }
-            // Platzhalter vom Umsortieren entfernen, solange wir Merge-Ziel sind
+            // Remove the reorder placeholder while this icon is the merge target
             this.get_parent()?.get_parent()?._delegate?._clearDragPlaceholder?.();
             ext._setMergeTarget(this);
             return DND.DragMotionResult.COPY_DROP;
@@ -472,8 +487,8 @@ export default class AppFolderDockExtension extends Extension {
                     {kind: 'app', id, after: ext._after(dash, this, x, y)});
                 return true;
             }
-            // Der Drag-Monitor hat das Highlight zu diesem Zeitpunkt schon entfernt,
-            // deshalb die Position erneut prüfen.
+            // The drag monitor has already cleared the highlight at this point,
+            // so check the position again.
             const inCenter = x > this.width * 0.25 && x < this.width * 0.75 &&
                 y > this.height * 0.25 && y < this.height * 0.75;
             if (!ext._canMerge(source, this) || !inCenter)
@@ -503,7 +518,7 @@ export default class AppFolderDockExtension extends Extension {
         return dash?._isHorizontal === false ? y > actor.height / 2 : x > actor.width / 2;
     }
 
-    // Einfüge-Markierung (Balken vor/hinter dem Ziel-Icon) beim Verschieben eines Ordners
+    // Insertion mark (bar before/after the target icon) while moving a folder
     _setDropMark(actor, dash, after) {
         const horizontal = dash?._isHorizontal !== false;
         const cls = horizontal
@@ -531,7 +546,7 @@ export default class AppFolderDockExtension extends Extension {
         icon?.add_style_class_name('afd-merge-target');
     }
 
-    // Patcht DockAppIconMenu.prototype einmalig; true, wenn gerade gepatcht wurde
+    // Patches DockAppIconMenu.prototype once; true if it was patched just now
     _patchMenu(menu) {
         const proto = Object.getPrototypeOf(menu);
         if (this._menuProto === proto)
@@ -556,19 +571,19 @@ export default class AppFolderDockExtension extends Extension {
             return;
 
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        const sub = new PopupMenu.PopupSubMenuMenuItem('Zu Ordner hinzufügen');
+        const sub = new PopupMenu.PopupSubMenuMenuItem(_('Add to folder'));
         this._load().forEach(folder => {
             const item = new PopupMenu.PopupMenuItem(folder.name);
             item.connect('activate', () => this.addToFolder(id, folder.id));
             sub.menu.addMenuItem(item);
         });
-        const fresh = new PopupMenu.PopupMenuItem('Neuer Ordner …');
+        const fresh = new PopupMenu.PopupMenuItem(_('New folder …'));
         fresh.connect('activate', () => this.createFolder(id));
         sub.menu.addMenuItem(fresh);
         menu.addMenuItem(sub);
     }
 
-    // ---- Dash-Synchronisierung ----------------------------------------
+    // ---- Dash synchronisation -------------------------------------------
 
     _items(dash) {
         dash._afdItems ??= new Map();
@@ -590,13 +605,14 @@ export default class AppFolderDockExtension extends Extension {
         const folders = this._load();
         const items = this._items(dash);
 
-        if (!dash._afdConnected) {
-            dash._afdConnected = true;
-            dash.connect('destroy', () => this._teardownDash(dash));
-            dash.connect('icon-size-changed', () => this._updateItems(dash));
+        if (!dash._afdSignals) {
+            dash._afdSignals = [
+                dash.connect('destroy', () => this._teardownDash(dash, true)),
+                dash.connect('icon-size-changed', () => this._updateItems(dash)),
+            ];
         }
 
-        // Mitglieder ausblenden
+        // Hide apps that live in folders
         const hidden = new Set(folders.flatMap(f => f.apps));
         for (const actor of box.get_children()) {
             const app = actor.child?._delegate?.app;
@@ -604,7 +620,7 @@ export default class AppFolderDockExtension extends Extension {
                 actor.visible = !hidden.has(app.get_id());
         }
 
-        // Verwaiste Ordner-Items entfernen
+        // Remove items of deleted folders
         for (const [id, item] of items) {
             if (!folders.some(f => f.id === id)) {
                 item.actor.destroy();
@@ -612,7 +628,7 @@ export default class AppFolderDockExtension extends Extension {
             }
         }
 
-        // Ordner-Items anlegen/aktualisieren
+        // Create/update folder items
         const pending = [];
         for (const folder of folders) {
             let item = items.get(folder.id);
@@ -626,7 +642,7 @@ export default class AppFolderDockExtension extends Extension {
                 pending.push(folder);
         }
 
-        // Platzieren: Anker auf andere Ordner erst nach deren Platzierung auflösen
+        // Place items; anchors pointing at other folders resolve after those are placed
         const placed = new Set(folders.filter(f => !pending.includes(f)).map(f => f.id));
         const insert = (folder, index) => {
             const item = items.get(folder.id);
@@ -664,7 +680,7 @@ export default class AppFolderDockExtension extends Extension {
         return dash._separator ? kids.indexOf(dash._separator) : kids.length;
     }
 
-    // null = Anker ist ein Ordner, der noch nicht platziert wurde
+    // null = the anchor is a folder that has not been placed yet
     _resolveIndex(dash, folder, folders, placed) {
         const kids = dash._box.get_children();
         const anchor = folder.anchor;
@@ -700,24 +716,21 @@ export default class AppFolderDockExtension extends Extension {
         }
     }
 
-    _teardownDash(dash) {
-        if (!dash._afdItems)
-            return;
-        for (const item of dash._afdItems.values())
-            item.actor.destroy();
-        dash._afdItems.clear();
-
-        try {
+    _teardownDash(dash, destroyed = false) {
+        if (!destroyed) {
+            dash._afdSignals?.forEach(id => dash.disconnect(id));
             for (const actor of dash._box.get_children()) {
                 if (actor.child?._delegate?.app)
                     actor.visible = true;
             }
-        } catch (e) {
-            // Dash wird gerade zerstört
         }
+        delete dash._afdSignals;
+
+        dash._afdItems?.forEach(item => item.actor.destroy());
+        delete dash._afdItems;
     }
 
-    // ---- Datenmodell ---------------------------------------------------
+    // ---- Data model ------------------------------------------------------
 
     _load() {
         try {
@@ -761,7 +774,7 @@ export default class AppFolderDockExtension extends Extension {
         });
         folders.push({
             id: GLib.uuid_string_random(),
-            name: `Ordner ${folders.length + 1}`,
+            name: `${_('Folder')} ${folders.length + 1}`,
             apps: [appId],
         });
         this._save(folders);
@@ -774,7 +787,7 @@ export default class AppFolderDockExtension extends Extension {
         });
         folders.push({
             id: GLib.uuid_string_random(),
-            name: `Ordner ${folders.length + 1}`,
+            name: `${_('Folder')} ${folders.length + 1}`,
             apps: [targetId, droppedId],
         });
         this._save(folders);
@@ -798,7 +811,7 @@ export default class AppFolderDockExtension extends Extension {
         const folder = folders.find(f => f.id === folderId);
         if (!folder)
             return;
-        // Anker auf sich selbst oder auf einen Ordner, der auf uns zeigt, vermeiden
+        // Avoid anchoring to ourselves or to a folder that is anchored to us
         const target = anchor.kind === 'folder' ? folders.find(f => f.id === anchor.id) : null;
         if (anchor.kind === 'folder' && (!target || target.id === folderId))
             return;
